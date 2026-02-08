@@ -1,0 +1,6 @@
+apiVersion: cluster.karmada.io/v1alpha1
+kind: Cluster
+metadata:
+  name: kind-member1
+spec:
+  syncMode: Push
