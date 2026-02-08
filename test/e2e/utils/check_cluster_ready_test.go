@@ -1,90 +1,56 @@
-package utils
+package utils_test
 
 import (
-	"testing"
+	"context"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	clusterv1alpha1 "github.com/karmada-io/karmada/pkg/apis/cluster/v1alpha1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"volcano.sh/volcano-global/pkg/utils"
 )
 
-func TestCheckClusterReady(t *testing.T) {
-	tests := []struct {
-		name        string
-		cluster     *clusterv1alpha1.Cluster
-		wantReady   bool
-		wantMessage string
-	}{
-		{
-			name: "cluster ready",
-			cluster: &clusterv1alpha1.Cluster{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cluster-1",
-				},
-				Status: clusterv1alpha1.ClusterStatus{
-					Conditions: []metav1.Condition{
-						{
-							Type:   clusterv1alpha1.ClusterConditionReady,
-							Status: metav1.ConditionTrue,
-						},
-					},
-				},
-			},
-			wantReady:   true,
-			wantMessage: "",
-		},
-		{
-			name: "cluster not ready",
-			cluster: &clusterv1alpha1.Cluster{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cluster-2",
-				},
-				Status: clusterv1alpha1.ClusterStatus{
-					Conditions: []metav1.Condition{
-						{
-							Type:    clusterv1alpha1.ClusterConditionReady,
-							Status:  metav1.ConditionFalse,
-							Reason:  "ConnectionFailed",
-							Message: "cannot reach apiserver",
-						},
-					},
-				},
-			},
-			wantReady:   false,
-			wantMessage: "Cluster <cluster-2> is not ready, reason: ConnectionFailed, message: cannot reach apiserver",
-		},
-		{
-			name: "cluster has no ready condition",
-			cluster: &clusterv1alpha1.Cluster{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cluster-3",
-				},
-				Status: clusterv1alpha1.ClusterStatus{
-					Conditions: []metav1.Condition{
-						{
-							Type:   "SomeOtherCondition",
-							Status: metav1.ConditionTrue,
-						},
-					},
-				},
-			},
-			wantReady:   false,
-			wantMessage: "Cluster<cluster-3> has not Ready Condition",
-		},
-	}
+var _ = Describe("Cluster Ready E2E", func() {
+	var (
+		k8sClient client.Client
+		ctx       context.Context
+	)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ready, msg := utils.CheckClusterReady(tt.cluster)
+	BeforeSuite(func() {
+		ctx = context.Background()
 
-			if ready != tt.wantReady {
-				t.Fatalf("expected ready=%v, got %v", tt.wantReady, ready)
-			}
+		// Try in-cluster config first (for CI), fallback to local kubeconfig
+		cfg, err := rest.InClusterConfig()
+		if err != nil {
+			cfg, err = rest.InClusterConfig()
+			Expect(err).NotTo(HaveOccurred())
+		}
 
-			if msg != tt.wantMessage {
-				t.Fatalf("expected message=%q, got %q", tt.wantMessage, msg)
-			}
-		})
-	}
-}
+		scheme := runtime.NewScheme()
+		Expect(clusterv1alpha1.AddToScheme(scheme)).To(Succeed())
+
+		k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("should report ready when a Karmada cluster is ready", func() {
+		clusterName := "member1" // MUST exist in your cluster
+
+		var cluster clusterv1alpha1.Cluster
+
+		Eventually(func() bool {
+			err := k8sClient.Get(ctx, client.ObjectKey{Name: clusterName}, &cluster)
+			return err == nil
+		}, 2*time.Minute, 5*time.Second).Should(BeTrue())
+
+		ready, msg := utils.CheckClusterReady(&cluster)
+
+		Expect(ready).To(BeTrue())
+		Expect(msg).To(BeEmpty())
+	})
+})

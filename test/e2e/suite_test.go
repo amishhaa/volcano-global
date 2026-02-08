@@ -9,5 +9,5 @@ import (
 
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Volcano-Global E2E Suite")
+	RunSpecs(t, "Volcano Global E2E Suite")
 }
